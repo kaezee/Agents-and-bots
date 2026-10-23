@@ -86,8 +86,17 @@ class BotTests(unittest.TestCase):
 
     def test_feeds_deduplicated(self):
         feeds = bot.feeds_for([self.augur, self.augur])
-        self.assertEqual(len(feeds), len({f.url for f in feeds}))
-        self.assertEqual(len(feeds), 10 * 2 + 2)
+        self.assertEqual(len(feeds), 2)  # one combined "new", one combined "comments"
+        new = next(f for f in feeds if f.kind == "new")
+        self.assertIn("/r/vibecoding+", new.url)
+        self.assertEqual(new.url.count("+"), 11)  # 10 keyword + 2 every-post subs
+        beta = bot.Item("t3_x", "post", "betatests", "t", "", "", "", None)
+        self.assertEqual(new.mode_for(self.augur, beta), "every_post")
+        react = bot.Item("t1_x", "comment", "reactjs", "t", "", "", "", None)
+        comments = next(f for f in feeds if f.kind == "comments")
+        self.assertEqual(comments.mode_for(self.augur, react), "keyword")
+        beta.kind = "comment"
+        self.assertIsNone(comments.mode_for(self.augur, beta))
 
     def test_payload(self):
         m = bot.match_item(self.augur, bot.parse_feed(POSTS, "nextjs", "new")[0], "keyword")
@@ -126,6 +135,22 @@ class BotTests(unittest.TestCase):
             bot.run_pass(self.settings, [self.augur], seen, True, True)
             self.assertEqual(first, len(bot.search_queries(self.augur)))
             self.assertEqual(sum("search.rss" in c for c in calls), 0)  # not due yet
+        finally:
+            bot.http_get, bot.time.sleep = orig
+
+    def test_rate_limit_stops_the_pass(self):
+        calls = []
+        def limited(url, ua):
+            calls.append(url)
+            raise bot.RateLimited("still rate limited after waiting")
+        orig = (bot.http_get, bot.time.sleep)
+        bot.http_get, bot.time.sleep = limited, (lambda s: None)
+        try:
+            seen = bot.Seen(HERE / "nonexistent-test-state.json")
+            seen.save = lambda: None
+            sent, failed, total = bot.run_pass(self.settings, [self.augur], seen, True, True)
+            self.assertEqual(len(calls), 1)  # gave up after the first refusal
+            self.assertEqual((sent, failed), (0, total))
         finally:
             bot.http_get, bot.time.sleep = orig
 

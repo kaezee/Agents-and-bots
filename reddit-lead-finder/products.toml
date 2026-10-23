@@ -12,8 +12,10 @@
 # Reddit blocks requests without a descriptive User-Agent. Put your username in.
 user_agent = "lead-finder/0.1 (personal alert bot; by u/kaezee13)"
 poll_minutes = 5
-# Pause between feed requests, so unauthenticated RSS isn't rate limited.
-seconds_between_requests = 6
+# Pause between feed requests. Reddit allows roughly one unauthenticated
+# request a minute from cloud IPs, and the feeds are combined so a pass is
+# only 2 requests (4 when the Reddit-wide search is due).
+seconds_between_requests = 30
 # Ignore anything older than this, even if it's new to the bot.
 max_age_hours = 24
 # Your own Reddit username(s), so your replies never alert you.

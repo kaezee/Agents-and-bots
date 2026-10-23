@@ -198,19 +198,24 @@ def parse_feed(xml_text: str, sub: str, kind: str) -> list[Item]:
     return items
 
 
+class RateLimited(Exception):
+    """Reddit refused twice in a row; stop this pass and try next time."""
+
+
 def http_get(url: str, user_agent: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": user_agent})
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 return r.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < 2:
-                wait = int(e.headers.get("Retry-After") or 60)
-                log(f"rate limited by Reddit, waiting {wait}s")
-                time.sleep(wait)
-                continue
-            raise
+            if e.code != 429:
+                raise
+            if attempt == 1:
+                raise RateLimited("still rate limited after waiting") from e
+            wait = min(int(e.headers.get("Retry-After") or 60), 120)
+            log(f"rate limited by Reddit, waiting {wait}s")
+            time.sleep(wait)
     raise RuntimeError("unreachable")
 
 
@@ -330,19 +335,27 @@ class Feed:
     sub: str = ""
 
 
-def feeds_for(products: list[Product]) -> list[Feed]:
-    """Every subreddit feed any product needs, each fetched once per pass."""
-    out: dict[tuple[str, str], None] = {}
+def feeds_for(products: list[Product], per_feed: int = 15) -> list[Feed]:
+    """Every subreddit any product needs, combined into multi-subreddit feeds
+    (r/a+b+c/new), so a pass is a few requests instead of one per subreddit.
+    Reddit rate-limits unauthenticated requests hard, especially from cloud IPs."""
+    subs: dict[str, dict[str, str]] = {"new": {}, "comments": {}}
     for p in products:
         for s in p.keyword_subreddits:
-            out[(s, "new")] = None
-            out[(s, "comments")] = None
+            subs["new"].setdefault(s.lower(), s)
+            subs["comments"].setdefault(s.lower(), s)
         for s in p.every_post_subreddits:
-            out[(s, "new")] = None
-    return [
-        Feed(feed_url(s, k), f"r/{s} {k}", k, lambda p, it, s=s, k=k: p.watches(s, k), s)
-        for s, k in out
-    ]
+            subs["new"].setdefault(s.lower(), s)
+    feeds = []
+    for kind, names in subs.items():
+        names = list(names.values())
+        for i in range(0, len(names), per_feed):
+            chunk = names[i:i + per_feed]
+            sub = "+".join(chunk)
+            label = f"{kind} in {len(chunk)} subreddits"
+            feeds.append(Feed(feed_url(sub, kind), label, kind,
+                              lambda p, it, k=kind: p.watches(it.subreddit, k)))
+    return feeds
 
 
 def search_feeds(product: Product) -> list[Feed]:
@@ -384,10 +397,16 @@ def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool,
             time.sleep(settings["seconds_between_requests"])
         try:
             items = parse_feed(http_get(feed.url, settings["user_agent"]), feed.sub, feed.kind)
+        except RateLimited as e:
+            left = len(feeds) - i
+            log(f"{feed.label}: {e}; skipping the {left} remaining feed(s) until next pass")
+            failed += left
+            break
         except Exception as e:  # one bad feed shouldn't stop the pass
             log(f"{feed.label}: {e}")
             failed += 1
             continue
+        log(f"{feed.label}: {len(items)} item(s)")
         for it in items:
             for p in products:
                 key = f"{p.name}:{it.id}"
