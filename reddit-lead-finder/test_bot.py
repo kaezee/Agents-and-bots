@@ -110,12 +110,15 @@ class BotTests(unittest.TestCase):
         joined = " ".join(qs)
         for kws in self.augur.keywords.values():
             for kw in kws:
-                self.assertIn(f'"{kw}"', joined)
+                if kw in self.augur.search_skip_keywords:
+                    self.assertNotIn(f'"{kw}"', joined)
+                else:
+                    self.assertIn(f'"{kw}"', joined)
 
     def test_search_scope(self):
         feed = bot.search_feeds(self.augur)[0]
         it = bot.Item("t3_x", "post", "webdev", "Feedback widget?", "", "", "", None)
-        self.assertEqual(feed.mode_for(self.augur, it), "keyword")
+        self.assertEqual(feed.mode_for(self.augur, it), "search")
         it.subreddit = "lovable"  # skipped on purpose
         self.assertIsNone(feed.mode_for(self.augur, it))
         it.subreddit = "reactjs"  # already watched by its own feed
@@ -153,6 +156,26 @@ class BotTests(unittest.TestCase):
             self.assertEqual((sent, failed), (0, total))
         finally:
             bot.http_get, bot.time.sleep = orig
+
+    def test_search_skip_keywords(self):
+        it = bot.Item("t3_x", "post", "FantasyPL", "Update", "Use the feedback button to report bugs", "", "", None)
+        self.assertIsNone(bot.match_item(self.augur, it, "search"))
+        self.assertIsNotNone(bot.match_item(self.augur, it, "keyword"))  # fine in watched subs
+        it.body = "How do you collect feedback from users?"
+        self.assertIsNotNone(bot.match_item(self.augur, it, "search"))  # "feedback from users"
+
+    def test_every_post_excludes_mobile_only_there(self):
+        it = bot.Item("t3_x", "post", "betatests", "[Android] Looking for 12 testers", "", "", "", None)
+        self.assertIsNone(bot.match_item(self.augur, it, "every_post"))
+        it.title = "Looking for testers for my web app"
+        self.assertIsNotNone(bot.match_item(self.augur, it, "every_post"))
+        it.title = "Need a feedback widget, my Android users too"
+        self.assertIsNotNone(bot.match_item(self.augur, it, "keyword"))
+
+    def test_search_payload_says_so(self):
+        it = bot.Item("t3_x", "post", "webdev", "Feedback widget?", "", "u", "a", None)
+        e = bot.discord_payload(bot.match_item(self.augur, it, "search"))["embeds"][0]
+        self.assertIn("Reddit-wide search", e["fields"][1]["value"])
 
 
 if __name__ == "__main__":

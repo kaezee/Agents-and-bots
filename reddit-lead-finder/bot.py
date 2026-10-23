@@ -47,6 +47,8 @@ class Product:
     search_all: bool = False
     search_minutes: int = 30
     search_skip_subreddits: list[str] = field(default_factory=list)
+    search_skip_keywords: list[str] = field(default_factory=list)
+    every_post_exclude: list[str] = field(default_factory=list)
     _kw_patterns: list[tuple[str, str, re.Pattern]] = field(default_factory=list, repr=False)
     _ex_patterns: list[re.Pattern] = field(default_factory=list, repr=False)
 
@@ -56,6 +58,8 @@ class Product:
             for group, kws in self.keywords.items() for kw in kws
         ]
         self._ex_patterns = [phrase_pattern(w) for w in self.exclude]
+        self._every_post_ex = [phrase_pattern(w) for w in self.every_post_exclude]
+        self._search_skip = {normalize(k).lower() for k in self.search_skip_keywords}
 
     def watches(self, sub: str, kind: str) -> str | None:
         """Return the mode this product uses for a feed, or None."""
@@ -99,6 +103,8 @@ def load_config(path: Path) -> tuple[dict, list[Product]]:
             search_all=p.get("search_all", False),
             search_minutes=p.get("search_minutes", 30),
             search_skip_subreddits=p.get("search_skip_subreddits", []),
+            search_skip_keywords=p.get("search_skip_keywords", []),
+            every_post_exclude=p.get("exclude", {}).get("every_post", []),
         )
         for p in raw.get("product", [])
     ]
@@ -145,6 +151,8 @@ def search_queries(product: Product, max_len: int = 250) -> list[str]:
     queries, cur = [], ""
     for kws in product.keywords.values():
         for kw in kws:
+            if normalize(kw).lower() in product._search_skip:
+                continue
             term = f'"{kw}"'
             if cur and len(cur) + len(term) + 4 > max_len:
                 queries.append(cur)
@@ -237,8 +245,12 @@ def match_item(product: Product, item: Item, mode: str) -> Match | None:
     if any(p.search(text) for p in product._ex_patterns):
         return None
     if mode == "every_post":
+        if any(p.search(text) for p in product._every_post_ex):
+            return None
         return Match(product, item, mode, None, None)
     for group, kw, pat in product._kw_patterns:
+        if mode == "search" and normalize(kw).lower() in product._search_skip:
+            continue
         if pat.search(text):
             return Match(product, item, mode, kw, group)
     return None
@@ -255,6 +267,8 @@ def snippet(text: str, limit: int = 300) -> str:
 def discord_payload(m: Match) -> dict:
     it = m.item
     why = f"`{m.keyword}` ({m.group.replace('_', ' ')})" if m.keyword else "new post (every-post sub)"
+    if m.mode == "search":
+        why += ", Reddit-wide search"
     return {
         "username": "Lead finder",
         "allowed_mentions": {"parse": []},
@@ -367,7 +381,7 @@ def search_feeds(product: Product) -> list[Feed]:
     def mode_for(p: Product, it: Item) -> str | None:
         if p is not product or it.subreddit.lower() in skip or p.watches(it.subreddit, "new"):
             return None
-        return "keyword"
+        return "search"
 
     return [
         Feed(search_url(q), f"{product.name} search {i + 1}", "search", mode_for)

@@ -42,6 +42,10 @@ search_all = true
 search_minutes = 30
 # Never alert from these, even when search finds a match there.
 search_skip_subreddits = ["lovable"]
+# Keywords used only in the subreddits above, never in the Reddit-wide search:
+# across all of Reddit they mostly match announcements ("use the feedback
+# button") or unrelated fields.
+search_skip_keywords = ["feedback button", "collect feedback"]
 
 [product.keywords]
 asking_for_a_tool = [
@@ -52,9 +56,15 @@ competitors = ["Sprig alternative", "PostHog surveys", "Formbricks", "Hotjar sur
 the_problem = [
   "users never give feedback", "get feedback from users",
   "where users get stuck", "rage clicks", "don't know if users",
+  "collect feedback", "feedback from users",
 ]
 stack = ["shadcn feedback", "supabase feedback"]
 
 [product.exclude]
-# Skip anything that also contains one of these, in either mode.
+# Skip anything that also contains one of these, in every mode.
 words = ["react native", "flutter", "wordpress", "NPS", "feature request board"]
+# Skip these only in every_post_subreddits, where most posts are mobile apps.
+every_post = [
+  "[android]", "[ios]", "android", "iphone", "ios beta", "testflight",
+  "google play", "play store", "app store", "closed testing",
+]
