@@ -103,6 +103,10 @@ class BotTests(unittest.TestCase):
         e = bot.discord_payload(m)["embeds"][0]
         self.assertEqual(e["url"], "https://www.reddit.com/r/nextjs/comments/aaa/x/")
         self.assertIn("r/nextjs", [f["value"] for f in e["fields"]])
+        notes = next(f["value"] for f in e["fields"] if f["name"] == "Reply notes")
+        self.assertTrue(notes.startswith("• Answer their question first"))
+        self.assertIn("?ref=reddit", notes)
+        self.assertLessEqual(len(notes), 1024)
 
     def test_search_queries_cover_every_keyword(self):
         qs = bot.search_queries(self.augur)

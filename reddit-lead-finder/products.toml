@@ -27,6 +27,18 @@ description = "In-app feedback for React web apps (Vite, Next.js, Remix): one qu
 good_match = "Someone with a React web app that has logged-in users, past launch, who wants to know what their users think or where they get stuck."
 webhook_env = "DISCORD_WEBHOOK_AUGUR"
 
+# Shown at the bottom of every alert, as a reminder while you write the reply.
+# Your own words go in the reply; these are just the points to hit.
+reply_notes = [
+  "Answer their question first. Only mention Augur if it actually solves it.",
+  "Say it's yours: \"I built something for this\" / \"disclosure: I made this\".",
+  "One line on what it does: asks one question at the moment that matters, three answers + an optional note.",
+  "What sets it apart: no dependencies, copy a folder or use the shadcn CLI, data stays in their own Supabase/Postgres. MIT, free.",
+  "Not a fit? React Native, Flutter, NPS or feature-request boards: say so, or skip the thread.",
+  "Link: https://kaezee.github.io/Augur/?ref=reddit",
+  "Check the subreddit's self-promotion rules before posting.",
+]
+
 # Alert only when a keyword appears (new posts and new comments).
 # r/lovable is deliberately not here: read it yourself, never mention Augur there.
 keyword_subreddits = [

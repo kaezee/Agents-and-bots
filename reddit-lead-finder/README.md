@@ -64,7 +64,8 @@ Each product can use three modes:
 Keywords and excludes are case-insensitive whole phrases, so `NPS` doesn't
 match "snapshots". Anything containing an exclude word is skipped in every mode.
 Each alert shows the subreddit, thread title, matching keyword and its group,
-the first lines, and a link.
+the first lines, a link, and the product's `reply_notes`: the points to hit
+when you write the reply yourself.
 
 ## Adding a product
 

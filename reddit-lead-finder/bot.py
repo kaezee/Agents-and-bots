@@ -49,6 +49,7 @@ class Product:
     search_skip_subreddits: list[str] = field(default_factory=list)
     search_skip_keywords: list[str] = field(default_factory=list)
     every_post_exclude: list[str] = field(default_factory=list)
+    reply_notes: list[str] = field(default_factory=list)
     _kw_patterns: list[tuple[str, str, re.Pattern]] = field(default_factory=list, repr=False)
     _ex_patterns: list[re.Pattern] = field(default_factory=list, repr=False)
 
@@ -105,6 +106,7 @@ def load_config(path: Path) -> tuple[dict, list[Product]]:
             search_skip_subreddits=p.get("search_skip_subreddits", []),
             search_skip_keywords=p.get("search_skip_keywords", []),
             every_post_exclude=p.get("exclude", {}).get("every_post", []),
+            reply_notes=p.get("reply_notes", []),
         )
         for p in raw.get("product", [])
     ]
@@ -264,6 +266,11 @@ def snippet(text: str, limit: int = 300) -> str:
     return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
 
 
+def reply_notes(product: Product) -> str:
+    notes = "\n".join(f"• {n}" for n in product.reply_notes)
+    return notes if len(notes) <= 1024 else notes[:1023] + "…"  # Discord field limit
+
+
 def discord_payload(m: Match) -> dict:
     it = m.item
     why = f"`{m.keyword}` ({m.group.replace('_', ' ')})" if m.keyword else "new post (every-post sub)"
@@ -281,6 +288,8 @@ def discord_payload(m: Match) -> dict:
                 {"name": "Subreddit", "value": f"r/{it.subreddit}", "inline": True},
                 {"name": "Match", "value": why, "inline": True},
                 {"name": "Type", "value": it.kind, "inline": True},
+                *([{"name": "Reply notes", "value": reply_notes(m.product)}]
+                  if m.product.reply_notes else []),
             ],
             "footer": {"text": f"u/{it.author}" if it.author else ""},
         }],
