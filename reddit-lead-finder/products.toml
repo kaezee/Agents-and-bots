@@ -1,0 +1,51 @@
+# Reddit lead finder: one [[product]] block per product.
+#
+# To add a product, copy the Augur block, change every field, create a new
+# Discord channel with its own webhook, and put that webhook URL in .env under
+# the name you give `webhook_env`. Add the next product only once the Augur
+# channel shows at least one in five alerts is worth replying to.
+#
+# Keywords and excludes match case-insensitively, as whole words/phrases,
+# against post titles, post bodies and comments.
+
+[settings]
+# Reddit blocks requests without a descriptive User-Agent. Put your username in.
+user_agent = "lead-finder/0.1 (personal alert bot; by u/YOUR_REDDIT_USERNAME)"
+poll_minutes = 5
+# Pause between feed requests, so unauthenticated RSS isn't rate limited.
+seconds_between_requests = 6
+# Ignore anything older than this, even if it's new to the bot.
+max_age_hours = 24
+# Your own Reddit username(s), so your replies never alert you.
+ignore_authors = []
+
+[[product]]
+name = "Augur"
+description = "In-app feedback for React web apps (Vite, Next.js, Remix): one question at a moment the product chooses, a feedback panel, friction on labelled controls. Zero dependencies, copy a folder or shadcn CLI, data in your own Supabase/Postgres/API. MIT."
+good_match = "Someone with a React web app that has logged-in users, past launch, who wants to know what their users think or where they get stuck."
+webhook_env = "DISCORD_WEBHOOK_AUGUR"
+
+# Alert only when a keyword appears (new posts and new comments).
+# r/lovable is deliberately not here: read it yourself, never mention Augur there.
+keyword_subreddits = [
+  "vibecoding", "cursor", "ClaudeAI", "nextjs", "reactjs",
+  "Supabase", "SaaS", "indiehackers", "microsaas", "opensource",
+]
+# Every new post is the signal (someone launching a beta needs feedback).
+every_post_subreddits = ["betatests", "alphaandbetausers"]
+
+[product.keywords]
+asking_for_a_tool = [
+  "in-app feedback", "feedback widget", "feedback button",
+  "in-app survey", "microsurvey", "user feedback tool",
+]
+competitors = ["Sprig alternative", "PostHog surveys", "Formbricks", "Hotjar survey"]
+the_problem = [
+  "users never give feedback", "get feedback from users",
+  "where users get stuck", "rage clicks", "don't know if users",
+]
+stack = ["shadcn feedback", "supabase feedback"]
+
+[product.exclude]
+# Skip anything that also contains one of these, in either mode.
+words = ["react native", "flutter", "wordpress", "NPS", "feature request board"]

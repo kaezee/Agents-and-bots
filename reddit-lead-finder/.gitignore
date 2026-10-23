@@ -1,0 +1,4 @@
+.env
+seen.json
+seen.tmp
+__pycache__/
