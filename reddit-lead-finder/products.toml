@@ -10,14 +10,14 @@
 
 [settings]
 # Reddit blocks requests without a descriptive User-Agent. Put your username in.
-user_agent = "lead-finder/0.1 (personal alert bot; by u/YOUR_REDDIT_USERNAME)"
+user_agent = "lead-finder/0.1 (personal alert bot; by u/kaezee13)"
 poll_minutes = 5
 # Pause between feed requests, so unauthenticated RSS isn't rate limited.
 seconds_between_requests = 6
 # Ignore anything older than this, even if it's new to the bot.
 max_age_hours = 24
 # Your own Reddit username(s), so your replies never alert you.
-ignore_authors = []
+ignore_authors = ["kaezee13"]
 
 [[product]]
 name = "Augur"
