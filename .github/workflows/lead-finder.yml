@@ -1,0 +1,62 @@
+# Runs the Reddit lead finder every 5 minutes (GitHub often starts scheduled
+# runs late; expect every 5-15). Alerts go to Discord via the repository secret
+# DISCORD_WEBHOOK_AUGUR. Run it by hand from the Actions tab: tick "dry run" to
+# print what it would send right now, without sending or changing its memory.
+name: Lead finder
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: print matches from the current feeds, send nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: lead-finder
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: reddit-lead-finder
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dry run
+        if: ${{ inputs.dry_run }}
+        run: python bot.py --once --dry-run --backfill --state "$RUNNER_TEMP/dry-seen.json"
+
+      # seen.json is the bot's memory of what it has already looked at.
+      - name: Restore memory
+        if: ${{ !inputs.dry_run }}
+        uses: actions/cache/restore@v4
+        with:
+          path: reddit-lead-finder/seen.json
+          key: lead-finder-seen-${{ github.run_id }}
+          restore-keys: lead-finder-seen-
+
+      - name: Check feeds and alert
+        if: ${{ !inputs.dry_run }}
+        env:
+          DISCORD_WEBHOOK_AUGUR: ${{ secrets.DISCORD_WEBHOOK_AUGUR }}
+        run: python bot.py --once
+
+      - name: Save memory
+        if: ${{ always() && !inputs.dry_run && hashFiles('reddit-lead-finder/seen.json') != '' }}
+        uses: actions/cache/save@v4
+        with:
+          path: reddit-lead-finder/seen.json
+          key: lead-finder-seen-${{ github.run_id }}-${{ github.run_attempt }}

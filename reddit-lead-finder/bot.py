@@ -369,10 +369,11 @@ def search_due(product: Product, seen: Seen) -> bool:
     return time.time() - last >= product.search_minutes * 60
 
 
-def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool, alert: bool) -> int:
+def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool, alert: bool) -> tuple[int, int, int]:
+    """One pass over every feed. Returns (alerts sent, feeds failed, feeds total)."""
     ignore = {a.lower() for a in settings["ignore_authors"]}
     cutoff = datetime.now(timezone.utc) - timedelta(hours=settings["max_age_hours"])
-    sent = 0
+    sent = failed = 0
     feeds = feeds_for(products)
     for p in products:
         if search_due(p, seen):
@@ -385,6 +386,7 @@ def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool,
             items = parse_feed(http_get(feed.url, settings["user_agent"]), feed.sub, feed.kind)
         except Exception as e:  # one bad feed shouldn't stop the pass
             log(f"{feed.label}: {e}")
+            failed += 1
             continue
         for it in items:
             for p in products:
@@ -417,7 +419,7 @@ def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool,
                 sent += 1
                 log(f"{p.name}: r/{it.subreddit} {it.kind} -> {m.keyword or 'every post'}")
         seen.save()
-    return sent
+    return sent, failed, len(feeds)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -443,10 +445,13 @@ def main(argv: list[str] | None = None) -> int:
     if first:
         log("first run: recording what's already in the feeds without alerting")
     while True:
-        sent = run_pass(settings, products, seen, args.dry_run, alert=not first)
-        log(f"pass done, {sent} alert(s)")
+        sent, failed, total = run_pass(settings, products, seen, args.dry_run, alert=not first)
+        log(f"pass done, {sent} alert(s), {failed}/{total} feed(s) failed")
         first = False
         if args.once:
+            if failed == total:
+                log("every feed failed: Reddit may be blocking this machine's IP")
+                return 2
             return 0
         time.sleep(settings["poll_minutes"] * 60)
 

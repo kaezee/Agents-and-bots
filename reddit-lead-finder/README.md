@@ -31,6 +31,23 @@ To run it in the background, leave it running in a terminal, or schedule
 `python3 bot.py --once` every 5 minutes (cron on Mac/Linux, Task Scheduler on
 Windows).
 
+## Running it on GitHub Actions instead
+
+`.github/workflows/lead-finder.yml` runs `bot.py --once` every 5 minutes
+(GitHub often starts scheduled runs late, so expect every 5–15) and keeps
+`seen.json` in the Actions cache between runs. Setup is all in the browser:
+
+1. Repo **Settings → Secrets and variables → Actions → New repository secret**:
+   `DISCORD_WEBHOOK_AUGUR` = the webhook URL.
+2. Scheduled runs only happen on the repo's default branch, and are free on a
+   public repo.
+3. To test, open **Actions → Lead finder → Run workflow** and tick *dry run*: it
+   prints what it would send from the current feeds, without sending anything.
+
+If a run goes red with "every feed failed", Reddit is blocking GitHub's servers;
+run it on your own machine instead. GitHub pauses schedules in a public repo
+after 60 days without commits and emails you first; one click turns it back on.
+
 ## How matching works
 
 Each product can use three modes:
