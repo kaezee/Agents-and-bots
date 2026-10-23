@@ -33,6 +33,13 @@ keyword_subreddits = [
 ]
 # Every new post is the signal (someone launching a beta needs feedback).
 every_post_subreddits = ["betatests", "alphaandbetausers"]
+# Also search all of Reddit for the keywords (posts only), every 30 minutes,
+# to catch threads in subreddits not listed above. Keyword groups are combined
+# into a few OR-ed searches: 2 extra requests for Augur each time it runs.
+search_all = true
+search_minutes = 30
+# Never alert from these, even when search finds a match there.
+search_skip_subreddits = ["lovable"]
 
 [product.keywords]
 asking_for_a_tool = [

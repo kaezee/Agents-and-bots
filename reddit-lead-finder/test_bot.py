@@ -86,7 +86,7 @@ class BotTests(unittest.TestCase):
 
     def test_feeds_deduplicated(self):
         feeds = bot.feeds_for([self.augur, self.augur])
-        self.assertEqual(len(feeds), len(set(feeds)))
+        self.assertEqual(len(feeds), len({f.url for f in feeds}))
         self.assertEqual(len(feeds), 10 * 2 + 2)
 
     def test_payload(self):
@@ -94,6 +94,40 @@ class BotTests(unittest.TestCase):
         e = bot.discord_payload(m)["embeds"][0]
         self.assertEqual(e["url"], "https://www.reddit.com/r/nextjs/comments/aaa/x/")
         self.assertIn("r/nextjs", [f["value"] for f in e["fields"]])
+
+    def test_search_queries_cover_every_keyword(self):
+        qs = bot.search_queries(self.augur)
+        self.assertTrue(all(len(q) <= 250 for q in qs))
+        joined = " ".join(qs)
+        for kws in self.augur.keywords.values():
+            for kw in kws:
+                self.assertIn(f'"{kw}"', joined)
+
+    def test_search_scope(self):
+        feed = bot.search_feeds(self.augur)[0]
+        it = bot.Item("t3_x", "post", "webdev", "Feedback widget?", "", "", "", None)
+        self.assertEqual(feed.mode_for(self.augur, it), "keyword")
+        it.subreddit = "lovable"  # skipped on purpose
+        self.assertIsNone(feed.mode_for(self.augur, it))
+        it.subreddit = "reactjs"  # already watched by its own feed
+        self.assertIsNone(feed.mode_for(self.augur, it))
+
+    def test_search_runs_on_schedule(self):
+        calls = []
+        orig = (bot.http_get, bot.time.sleep)
+        bot.http_get = lambda url, ua: calls.append(url) or '<feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+        bot.time.sleep = lambda s: None
+        try:
+            seen = bot.Seen(HERE / "nonexistent-test-state.json")
+            seen.save = lambda: None
+            bot.run_pass(self.settings, [self.augur], seen, True, True)
+            first = sum("search.rss" in c for c in calls)
+            calls.clear()
+            bot.run_pass(self.settings, [self.augur], seen, True, True)
+            self.assertEqual(first, len(bot.search_queries(self.augur)))
+            self.assertEqual(sum("search.rss" in c for c in calls), 0)  # not due yet
+        finally:
+            bot.http_get, bot.time.sleep = orig
 
 
 if __name__ == "__main__":

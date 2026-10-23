@@ -22,7 +22,9 @@ import time
 import tomllib
 import urllib.error
 import urllib.request
+import urllib.parse
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -42,6 +44,9 @@ class Product:
     every_post_subreddits: list[str]
     keywords: dict[str, list[str]]  # group -> phrases
     exclude: list[str]
+    search_all: bool = False
+    search_minutes: int = 30
+    search_skip_subreddits: list[str] = field(default_factory=list)
     _kw_patterns: list[tuple[str, str, re.Pattern]] = field(default_factory=list, repr=False)
     _ex_patterns: list[re.Pattern] = field(default_factory=list, repr=False)
 
@@ -91,6 +96,9 @@ def load_config(path: Path) -> tuple[dict, list[Product]]:
             every_post_subreddits=p.get("every_post_subreddits", []),
             keywords=p.get("keywords", {}),
             exclude=p.get("exclude", {}).get("words", []),
+            search_all=p.get("search_all", False),
+            search_minutes=p.get("search_minutes", 30),
+            search_skip_subreddits=p.get("search_skip_subreddits", []),
         )
         for p in raw.get("product", [])
     ]
@@ -125,6 +133,26 @@ class Item:
 def feed_url(sub: str, kind: str) -> str:
     path = "new" if kind == "new" else "comments"
     return f"https://www.reddit.com/r/{sub}/{path}/.rss?limit=100"
+
+
+def search_url(query: str) -> str:
+    q = urllib.parse.quote(query)
+    return f"https://www.reddit.com/search.rss?q={q}&sort=new&t=day&limit=100"
+
+
+def search_queries(product: Product, max_len: int = 250) -> list[str]:
+    """Keyword phrases OR-ed together, a few per request, across all of Reddit."""
+    queries, cur = [], ""
+    for kws in product.keywords.values():
+        for kw in kws:
+            term = f'"{kw}"'
+            if cur and len(cur) + len(term) + 4 > max_len:
+                queries.append(cur)
+                cur = ""
+            cur = f"{cur} OR {term}" if cur else term
+    if cur:
+        queries.append(cur)
+    return queries
 
 
 def strip_html(fragment: str) -> str:
@@ -293,8 +321,17 @@ def log(msg: str) -> None:
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}", flush=True)
 
 
-def feeds_for(products: list[Product]) -> list[tuple[str, str]]:
-    """Every (subreddit, kind) any product needs, each fetched once per pass."""
+@dataclass
+class Feed:
+    url: str
+    label: str
+    kind: str  # "new", "comments" or "search"
+    mode_for: Callable[[Product, Item], str | None]
+    sub: str = ""
+
+
+def feeds_for(products: list[Product]) -> list[Feed]:
+    """Every subreddit feed any product needs, each fetched once per pass."""
     out: dict[tuple[str, str], None] = {}
     for p in products:
         for s in p.keyword_subreddits:
@@ -302,7 +339,34 @@ def feeds_for(products: list[Product]) -> list[tuple[str, str]]:
             out[(s, "comments")] = None
         for s in p.every_post_subreddits:
             out[(s, "new")] = None
-    return list(out)
+    return [
+        Feed(feed_url(s, k), f"r/{s} {k}", k, lambda p, it, s=s, k=k: p.watches(s, k), s)
+        for s, k in out
+    ]
+
+
+def search_feeds(product: Product) -> list[Feed]:
+    """Reddit-wide keyword search for one product, covering subreddits it
+    doesn't already watch. Results are re-checked locally, since Reddit's
+    search is looser than whole-phrase matching."""
+    skip = {s.lower() for s in product.search_skip_subreddits}
+
+    def mode_for(p: Product, it: Item) -> str | None:
+        if p is not product or it.subreddit.lower() in skip or p.watches(it.subreddit, "new"):
+            return None
+        return "keyword"
+
+    return [
+        Feed(search_url(q), f"{product.name} search {i + 1}", "search", mode_for)
+        for i, q in enumerate(search_queries(product))
+    ]
+
+
+def search_due(product: Product, seen: Seen) -> bool:
+    if not product.search_all:
+        return False
+    last = seen.ids.get(f"_last_search:{product.name}", 0)
+    return time.time() - last >= product.search_minutes * 60
 
 
 def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool, alert: bool) -> int:
@@ -310,21 +374,25 @@ def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool,
     cutoff = datetime.now(timezone.utc) - timedelta(hours=settings["max_age_hours"])
     sent = 0
     feeds = feeds_for(products)
-    for i, (sub, kind) in enumerate(feeds):
+    for p in products:
+        if search_due(p, seen):
+            feeds += search_feeds(p)
+            seen.add(f"_last_search:{p.name}")
+    for i, feed in enumerate(feeds):
         if i:
             time.sleep(settings["seconds_between_requests"])
         try:
-            items = parse_feed(http_get(feed_url(sub, kind), settings["user_agent"]), sub, kind)
+            items = parse_feed(http_get(feed.url, settings["user_agent"]), feed.sub, feed.kind)
         except Exception as e:  # one bad feed shouldn't stop the pass
-            log(f"r/{sub} {kind}: {e}")
+            log(f"{feed.label}: {e}")
             continue
         for it in items:
             for p in products:
                 key = f"{p.name}:{it.id}"
-                if key in seen:
+                mode = feed.mode_for(p, it)
+                if key in seen or (feed.kind == "search" and not mode):
                     continue
                 seen.add(key)
-                mode = p.watches(sub, kind)
                 if not alert or not mode or it.author.lower() in ignore:
                     continue
                 if it.published and it.published < cutoff:

@@ -38,6 +38,11 @@ Each product lists subreddits in two modes:
 - `keyword_subreddits`: new posts and new comments, alerted only when a
   keyword matches (title + body for posts, the comment text for comments).
 - `every_post_subreddits`: every new post alerts (e.g. beta-tester subs).
+- `search_all`: also searches all of Reddit for the keywords (posts only),
+  every `search_minutes` (default 30), to catch threads in subreddits you
+  don't watch. Subreddits listed above are left to their own feeds, and
+  `search_skip_subreddits` are never alerted from. Reddit's search is loose,
+  so every result is re-checked against the exact phrases and excludes.
 
 Keywords and excludes are case-insensitive whole phrases, so `NPS` doesn't
 match "snapshots". Anything containing an exclude word is skipped in both modes.
