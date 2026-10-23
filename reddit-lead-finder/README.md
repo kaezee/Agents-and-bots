@@ -31,6 +31,14 @@ To run it in the background, leave it running in a terminal, or schedule
 `python3 bot.py --once` every 5 minutes (cron on Mac/Linux, Task Scheduler on
 Windows).
 
+## Quiet hours
+
+`timezone` and `quiet_hours` in `products.toml` (set to IST, 23:00–08:00) stop
+notifications at night. The bot keeps checking; matches found then are held in
+`pending.json` and sent together, after a one-line summary, on the first run
+after quiet hours end. Discord shows each alert's post time in your own time
+zone. Set `quiet_hours = []` to get everything as it happens.
+
 ## Running it on GitHub Actions instead
 
 `.github/workflows/lead-finder.yml` runs `bot.py --once` every 5 minutes

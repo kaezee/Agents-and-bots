@@ -39,12 +39,15 @@ jobs:
         if: ${{ inputs.dry_run }}
         run: python bot.py --once --dry-run --backfill --state "$RUNNER_TEMP/dry-seen.json"
 
-      # seen.json is the bot's memory of what it has already looked at.
+      # seen.json is the bot's memory of what it has already looked at;
+      # pending.json holds alerts found during quiet hours.
       - name: Restore memory
         if: ${{ !inputs.dry_run }}
         uses: actions/cache/restore@v4
         with:
-          path: reddit-lead-finder/seen.json
+          path: |
+            reddit-lead-finder/seen.json
+            reddit-lead-finder/pending.json
           key: lead-finder-seen-${{ github.run_id }}
           restore-keys: lead-finder-seen-
 
@@ -58,5 +61,7 @@ jobs:
         if: ${{ always() && !inputs.dry_run && hashFiles('reddit-lead-finder/seen.json') != '' }}
         uses: actions/cache/save@v4
         with:
-          path: reddit-lead-finder/seen.json
+          path: |
+            reddit-lead-finder/seen.json
+            reddit-lead-finder/pending.json
           key: lead-finder-seen-${{ github.run_id }}-${{ github.run_attempt }}

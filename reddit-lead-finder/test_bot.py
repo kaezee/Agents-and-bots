@@ -181,6 +181,56 @@ class BotTests(unittest.TestCase):
         e = bot.discord_payload(bot.match_item(self.augur, it, "search"))["embeds"][0]
         self.assertIn("Reddit-wide search", e["fields"][1]["value"])
 
+    def test_quiet_hours_wrap_past_midnight(self):
+        q = ["23:00", "08:00"]
+        at = lambda h, m=0: datetime(2026, 10, 23, h, m)
+        self.assertTrue(bot.is_quiet(at(23), q))
+        self.assertTrue(bot.is_quiet(at(3), q))
+        self.assertTrue(bot.is_quiet(at(7, 59), q))
+        self.assertFalse(bot.is_quiet(at(8), q))
+        self.assertFalse(bot.is_quiet(at(22, 59), q))
+        self.assertFalse(bot.is_quiet(at(3), []))
+        self.assertTrue(bot.is_quiet(at(13), ["12:00", "14:00"]))
+
+    def test_outbox_holds_then_flushes(self):
+        import os, tempfile
+        sent = []
+        orig = (bot.send_discord, bot.time.sleep)
+        bot.send_discord, bot.time.sleep = (lambda w, p: sent.append(p)), (lambda s: None)
+        os.environ["TEST_HOOK"] = "x"
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                box = bot.Outbox(Path(d) / "pending.json")
+                box.hold("TEST_HOOK", {"embeds": [{"title": "a"}]})
+                box.hold("TEST_HOOK", {"embeds": [{"title": "b"}]})
+                self.assertEqual(len(bot.Outbox(Path(d) / "pending.json").held), 2)  # survives restarts
+                self.assertEqual(box.flush(["23:00", "08:00"]), 2)
+                self.assertIn("2 lead(s)", sent[0]["content"])
+                self.assertEqual([p["embeds"][0]["title"] for p in sent[1:]], ["a", "b"])
+                self.assertEqual(bot.Outbox(Path(d) / "pending.json").held, [])
+        finally:
+            bot.send_discord, bot.time.sleep = orig
+
+    def test_run_pass_holds_during_quiet_hours(self):
+        import tempfile
+        from datetime import timedelta
+        recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        feed = POSTS.replace("2026-10-23T10:00:00+00:00", recent)
+        orig = (bot.http_get, bot.time.sleep, bot.send_discord)
+        bot.http_get = lambda url, ua: feed if "/new/" in url else '<feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+        bot.time.sleep = lambda s: None
+        bot.send_discord = lambda w, p: self.fail("sent during quiet hours")
+        settings = {**self.settings, "quiet_hours": ["00:00", "23:59"]}
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                box = bot.Outbox(Path(d) / "pending.json")
+                seen = bot.Seen(Path(d) / "seen.json")
+                sent, _, _ = bot.run_pass(settings, [self.augur], seen, False, True, outbox=box)
+                self.assertEqual(sent, 1)
+                self.assertEqual(len(box.held), 1)
+        finally:
+            bot.http_get, bot.time.sleep, bot.send_discord = orig
+
 
 if __name__ == "__main__":
     unittest.main()

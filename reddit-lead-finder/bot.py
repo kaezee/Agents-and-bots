@@ -28,10 +28,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parent
 ATOM = "{http://www.w3.org/2005/Atom}"
 MAX_SEEN = 20000
+TZ = timezone.utc  # set from settings.timezone in main()
 
 
 # ---------- config ----------
@@ -91,6 +93,8 @@ def load_config(path: Path) -> tuple[dict, list[Product]]:
         "seconds_between_requests": 6,
         "max_age_hours": 24,
         "ignore_authors": [],
+        "timezone": "UTC",
+        "quiet_hours": [],
         **raw.get("settings", {}),
     }
     products = [
@@ -292,6 +296,7 @@ def discord_payload(m: Match) -> dict:
                   if m.product.reply_notes else []),
             ],
             "footer": {"text": f"u/{it.author}" if it.author else ""},
+            **({"timestamp": it.published.isoformat()} if it.published else {}),
         }],
     }
 
@@ -346,7 +351,58 @@ class Seen:
 # ---------- main loop ----------
 
 def log(msg: str) -> None:
-    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}", flush=True)
+    print(f"[{datetime.now(TZ):%Y-%m-%d %H:%M:%S %Z}] {msg}", flush=True)
+
+
+def is_quiet(now: datetime, quiet_hours: list[str]) -> bool:
+    """True inside quiet_hours ["23:00", "08:00"], which may wrap past midnight."""
+    if not quiet_hours:
+        return False
+    start, end = (datetime.strptime(t, "%H:%M").time() for t in quiet_hours)
+    t = now.time()
+    return start <= t < end if start < end else t >= start or t < end
+
+
+class Outbox:
+    """Alerts held during quiet hours, sent together when they end."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.held: list[dict] = []
+        if path.exists():
+            self.held = json.loads(path.read_text(encoding="utf-8"))
+
+    def hold(self, webhook_env: str, payload: dict) -> None:
+        self.held.append({"webhook_env": webhook_env, "payload": payload})
+        self.save()
+
+    def save(self) -> None:
+        self.path.write_text(json.dumps(self.held), encoding="utf-8")
+
+    def flush(self, quiet_hours: list[str]) -> int:
+        """Send everything held, each channel opening with a one-line summary."""
+        sent = 0
+        for env in dict.fromkeys(h["webhook_env"] for h in self.held):
+            webhook = os.environ.get(env)
+            if not webhook:
+                log(f"{env} is not set; keeping held alerts")
+                continue
+            batch = [h for h in self.held if h["webhook_env"] == env]
+            span = "–".join(quiet_hours)
+            try:
+                send_discord(webhook, {
+                    "username": "Lead finder",
+                    "content": f"☀️ {len(batch)} lead(s) from quiet hours ({span} {datetime.now(TZ):%Z}):",
+                })
+                for h in batch:
+                    send_discord(webhook, h["payload"])
+                    self.held.remove(h)
+                    sent += 1
+            except Exception as e:
+                log(f"sending held alerts failed, will retry: {e}")
+            finally:
+                self.save()
+        return sent
 
 
 @dataclass
@@ -405,7 +461,8 @@ def search_due(product: Product, seen: Seen) -> bool:
     return time.time() - last >= product.search_minutes * 60
 
 
-def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool, alert: bool) -> tuple[int, int, int]:
+def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool, alert: bool,
+             outbox: Outbox | None = None) -> tuple[int, int, int]:
     """One pass over every feed. Returns (alerts sent, feeds failed, feeds total)."""
     ignore = {a.lower() for a in settings["ignore_authors"]}
     cutoff = datetime.now(timezone.utc) - timedelta(hours=settings["max_age_hours"])
@@ -447,6 +504,11 @@ def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool,
                 payload = discord_payload(m)
                 if dry_run:
                     print(json.dumps(payload, indent=2, ensure_ascii=False))
+                elif outbox and is_quiet(datetime.now(TZ), settings["quiet_hours"]):
+                    outbox.hold(p.webhook_env, payload)
+                    log(f"{p.name}: quiet hours, holding r/{it.subreddit} {it.kind} until they end")
+                    sent += 1
+                    continue
                 else:
                     webhook = os.environ.get(p.webhook_env)
                     if not webhook:
@@ -476,18 +538,29 @@ def main(argv: list[str] | None = None) -> int:
 
     load_dotenv(HERE / ".env")
     settings, products = load_config(Path(args.config))
+    global TZ
+    try:
+        TZ = ZoneInfo(settings["timezone"])
+    except Exception:
+        log(f"unknown timezone {settings['timezone']!r}, using UTC")
     if not products:
         log("no [[product]] blocks in config")
         return 1
     if "YOUR_REDDIT_USERNAME" in settings["user_agent"]:
         log("set user_agent in products.toml to include your Reddit username")
     seen = Seen(Path(args.state))
+    outbox = None if args.dry_run else Outbox(Path(args.state).with_name("pending.json"))
 
     first = seen.fresh and not args.backfill
     if first:
         log("first run: recording what's already in the feeds without alerting")
     while True:
-        sent, failed, total = run_pass(settings, products, seen, args.dry_run, alert=not first)
+        if outbox and outbox.held and not is_quiet(datetime.now(TZ), settings["quiet_hours"]):
+            log(f"quiet hours over, sent {outbox.flush(settings['quiet_hours'])} held alert(s)")
+        sent, failed, total = run_pass(settings, products, seen, args.dry_run, alert=not first,
+                                       outbox=outbox)
+        if outbox:
+            outbox.save()
         log(f"pass done, {sent} alert(s), {failed}/{total} feed(s) failed")
         first = False
         if args.once:

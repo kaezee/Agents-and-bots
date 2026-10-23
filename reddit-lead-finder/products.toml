@@ -20,6 +20,11 @@ seconds_between_requests = 30
 max_age_hours = 24
 # Your own Reddit username(s), so your replies never alert you.
 ignore_authors = ["kaezee13"]
+# Times below, and the bot's log, use this time zone.
+timezone = "Asia/Kolkata"
+# No notifications between these times: matches found then are held and sent
+# together, with a one-line summary, when quiet hours end. [] to turn off.
+quiet_hours = ["23:00", "08:00"]
 
 [[product]]
 name = "Augur"
