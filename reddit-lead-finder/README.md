@@ -33,7 +33,7 @@ Windows).
 
 ## How matching works
 
-Each product lists subreddits in two modes:
+Each product can use three modes:
 
 - `keyword_subreddits`: new posts and new comments, alerted only when a
   keyword matches (title + body for posts, the comment text for comments).
@@ -45,7 +45,7 @@ Each product lists subreddits in two modes:
   so every result is re-checked against the exact phrases and excludes.
 
 Keywords and excludes are case-insensitive whole phrases, so `NPS` doesn't
-match "snapshots". Anything containing an exclude word is skipped in both modes.
+match "snapshots". Anything containing an exclude word is skipped in every mode.
 Each alert shows the subreddit, thread title, matching keyword and its group,
 the first lines, and a link.
 
