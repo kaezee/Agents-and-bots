@@ -52,6 +52,18 @@ keyword_subreddits = [
 ]
 # Every new post is the signal (someone launching a beta needs feedback).
 every_post_subreddits = ["betatests", "alphaandbetausers"]
+# Most of these are "I built X, feedback please", so instead of one alert each
+# they come as one list a day at this time (your time zone). "" for instant alerts.
+every_post_digest_at = "19:00"
+# Shown at the top of the digest. Modelled on the reply that worked: real
+# feedback first, Augur second.
+every_post_reply_notes = [
+  "Open their product and try it for a few minutes before writing anything.",
+  "Lead with 2-3 specific, honest observations: what confused you, what stood out, what would stop you signing up.",
+  "Then, only if it fits: they're asking for feedback, so offer Augur as a way to keep hearing from their own users, in their own database.",
+  "Say it's yours (\"I made an open source feedback tool...\"), one or two lines, no hard sell.",
+  "Link: https://github.com/kaezee/Augur or https://kaezee.github.io/Augur/?ref=reddit",
+]
 # Also search all of Reddit for the keywords (posts only), every 30 minutes,
 # to catch threads in subreddits not listed above. Keyword groups are combined
 # into a few OR-ed searches: 2 extra requests for Augur each time it runs.

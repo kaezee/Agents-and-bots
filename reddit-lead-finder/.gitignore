@@ -3,3 +3,4 @@ seen.json
 seen.tmp
 __pycache__/
 pending.json
+digest.json

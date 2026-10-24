@@ -52,6 +52,8 @@ class Product:
     search_skip_keywords: list[str] = field(default_factory=list)
     every_post_exclude: list[str] = field(default_factory=list)
     reply_notes: list[str] = field(default_factory=list)
+    every_post_digest_at: str = ""
+    every_post_reply_notes: list[str] = field(default_factory=list)
     _kw_patterns: list[tuple[str, str, re.Pattern]] = field(default_factory=list, repr=False)
     _ex_patterns: list[re.Pattern] = field(default_factory=list, repr=False)
 
@@ -111,6 +113,8 @@ def load_config(path: Path) -> tuple[dict, list[Product]]:
             search_skip_keywords=p.get("search_skip_keywords", []),
             every_post_exclude=p.get("exclude", {}).get("every_post", []),
             reply_notes=p.get("reply_notes", []),
+            every_post_digest_at=p.get("every_post_digest_at", ""),
+            every_post_reply_notes=p.get("every_post_reply_notes", []),
         )
         for p in raw.get("product", [])
     ]
@@ -270,8 +274,8 @@ def snippet(text: str, limit: int = 300) -> str:
     return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
 
 
-def reply_notes(product: Product) -> str:
-    notes = "\n".join(f"• {n}" for n in product.reply_notes)
+def reply_notes(lines: list[str]) -> str:
+    notes = "\n".join(f"• {n}" for n in lines)
     return notes if len(notes) <= 1024 else notes[:1023] + "…"  # Discord field limit
 
 
@@ -292,7 +296,7 @@ def discord_payload(m: Match) -> dict:
                 {"name": "Subreddit", "value": f"r/{it.subreddit}", "inline": True},
                 {"name": "Match", "value": why, "inline": True},
                 {"name": "Type", "value": it.kind, "inline": True},
-                *([{"name": "Reply notes", "value": reply_notes(m.product)}]
+                *([{"name": "Reply notes", "value": reply_notes(m.product.reply_notes)}]
                   if m.product.reply_notes else []),
             ],
             "footer": {"text": f"u/{it.author}" if it.author else ""},
@@ -461,8 +465,79 @@ def search_due(product: Product, seen: Seen) -> bool:
     return time.time() - last >= product.search_minutes * 60
 
 
+class Digest:
+    """Every-post matches collected through the day and sent as one list at
+    every_post_digest_at, instead of one alert each."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.data: dict = {"last_sent": {}, "items": {}}
+        if path.exists():
+            self.data = json.loads(path.read_text(encoding="utf-8"))
+
+    def add(self, product: Product, it: Item) -> None:
+        items = self.data["items"].setdefault(product.name, [])
+        if any(i["link"] == it.link for i in items):
+            return
+        items.append({"title": it.title, "link": it.link, "subreddit": it.subreddit})
+        self.save()
+
+    def save(self) -> None:
+        self.path.write_text(json.dumps(self.data), encoding="utf-8")
+
+    def due(self, product: Product, now: datetime) -> bool:
+        if not product.every_post_digest_at:
+            return False
+        at = datetime.strptime(product.every_post_digest_at, "%H:%M").time()
+        return now.time() >= at and self.data["last_sent"].get(product.name) != now.date().isoformat()
+
+    def send(self, product: Product, now: datetime) -> int:
+        items = self.data["items"].get(product.name, [])
+        if items:
+            webhook = os.environ.get(product.webhook_env)
+            if not webhook:
+                log(f"{product.name}: {product.webhook_env} is not set; keeping the digest")
+                return 0
+            for message in digest_messages(product, items):
+                send_discord(webhook, message)
+        self.data["items"][product.name] = []
+        self.data["last_sent"][product.name] = now.date().isoformat()
+        self.save()
+        return len(items)
+
+
+def digest_messages(product: Product, items: list[dict]) -> list[dict]:
+    subs = ", ".join(f"r/{s}" for s in product.every_post_subreddits)
+    header = {
+        "username": "Lead finder",
+        "allowed_mentions": {"parse": []},
+        "content": f"📋 **{len(items)} new post(s)** in {subs} since the last digest. "
+                   "Pick the few you can give real feedback on.",
+    }
+    if product.every_post_reply_notes:
+        header["embeds"] = [{"title": "How to reply",
+                             "description": reply_notes(product.every_post_reply_notes)}]
+    lines = []
+    for i in items:
+        title = i["title"].replace("[", "(").replace("]", ")")
+        title = title if len(title) <= 100 else title[:99] + "…"
+        lines.append(f"• [{title}]({i['link']}) · r/{i['subreddit']}")
+    chunks, cur = [], ""
+    for line in lines:
+        if cur and len(cur) + len(line) + 1 > 4000:  # embed description limit is 4096
+            chunks.append(cur)
+            cur = ""
+        cur = f"{cur}\n{line}" if cur else line
+    if cur:
+        chunks.append(cur)
+    return [header] + [
+        {"username": "Lead finder", "embeds": [{"description": c, "color": 0x5865F2}]}
+        for c in chunks
+    ]
+
+
 def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool, alert: bool,
-             outbox: Outbox | None = None) -> tuple[int, int, int]:
+             outbox: Outbox | None = None, digest: Digest | None = None) -> tuple[int, int, int]:
     """One pass over every feed. Returns (alerts sent, feeds failed, feeds total)."""
     ignore = {a.lower() for a in settings["ignore_authors"]}
     cutoff = datetime.now(timezone.utc) - timedelta(hours=settings["max_age_hours"])
@@ -500,6 +575,11 @@ def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool,
                     continue
                 m = match_item(p, it, mode)
                 if not m:
+                    continue
+                if digest and m.mode == "every_post" and p.every_post_digest_at:
+                    digest.add(p, it)
+                    log(f"{p.name}: r/{it.subreddit} post -> today's digest")
+                    sent += 1
                     continue
                 payload = discord_payload(m)
                 if dry_run:
@@ -550,6 +630,7 @@ def main(argv: list[str] | None = None) -> int:
         log("set user_agent in products.toml to include your Reddit username")
     seen = Seen(Path(args.state))
     outbox = None if args.dry_run else Outbox(Path(args.state).with_name("pending.json"))
+    digest = None if args.dry_run else Digest(Path(args.state).with_name("digest.json"))
 
     first = seen.fresh and not args.backfill
     if first:
@@ -557,8 +638,15 @@ def main(argv: list[str] | None = None) -> int:
     while True:
         if outbox and outbox.held and not is_quiet(datetime.now(TZ), settings["quiet_hours"]):
             log(f"quiet hours over, sent {outbox.flush(settings['quiet_hours'])} held alert(s)")
+        now = datetime.now(TZ)
+        for p in products:
+            if digest and digest.due(p, now) and not is_quiet(now, settings["quiet_hours"]):
+                try:
+                    log(f"{p.name}: sent today's digest of {digest.send(p, now)} post(s)")
+                except Exception as e:
+                    log(f"{p.name}: sending the digest failed, will retry: {e}")
         sent, failed, total = run_pass(settings, products, seen, args.dry_run, alert=not first,
-                                       outbox=outbox)
+                                       outbox=outbox, digest=digest)
         if outbox:
             outbox.save()
         log(f"pass done, {sent} alert(s), {failed}/{total} feed(s) failed")

@@ -39,11 +39,21 @@ notifications at night. The bot keeps checking; matches found then are held in
 after quiet hours end. Discord shows each alert's post time in your own time
 zone. Set `quiet_hours = []` to get everything as it happens.
 
+## Daily digest for every-post subreddits
+
+Most posts in `every_post_subreddits` are "I built X, feedback please", so with
+`every_post_digest_at = "19:00"` they arrive as one list a day instead of one
+alert each, headed by `every_post_reply_notes`. Keyword and search matches still
+alert straight away. The digest goes out with the first run after 19:00; if no
+run happens before quiet hours start, those posts roll into the next day's list.
+
 ## Running it on GitHub Actions instead
 
-`.github/workflows/lead-finder.yml` runs `bot.py --once` every 5 minutes
-(GitHub often starts scheduled runs late, so expect every 5–15) and keeps
-`seen.json` in the Actions cache between runs. Setup is all in the browser:
+`.github/workflows/lead-finder.yml` runs `bot.py --once` and keeps the bot's
+state (`seen.json`, `pending.json`, `digest.json`) in the Actions cache between
+runs. GitHub's own schedule turned out to be unreliable (4 runs in 10 hours), so
+cron-job.org starts it every 10 minutes; the built-in schedule (every 30
+minutes) is only a backup. Setup is all in the browser:
 
 1. Repo **Settings → Secrets and variables → Actions → New repository secret**:
    `DISCORD_WEBHOOK_AUGUR` = the webhook URL.
@@ -51,6 +61,16 @@ zone. Set `quiet_hours = []` to get everything as it happens.
    public repo.
 3. To test, open **Actions → Lead finder → Run workflow** and tick *dry run*: it
    prints what it would send from the current feeds, without sending anything.
+4. **Reliable runs with cron-job.org.** Create a fine-grained token at GitHub →
+   Settings → Developer settings → Personal access tokens → Fine-grained tokens:
+   only this repository, permission **Actions: Read and write**. Then, on
+   cron-job.org, create a cron job:
+   - URL: `https://api.github.com/repos/kaezee/Agents-and-bots/actions/workflows/lead-finder.yml/dispatches`
+   - Schedule: every 10 minutes
+   - Advanced → Request method `POST`; headers `Authorization: Bearer <token>`,
+     `Accept: application/vnd.github+json`, `Content-Type: application/json`;
+     request body `{"ref":"main"}`
+   - A working call returns HTTP 204. Renew the token before it expires.
 
 If a run goes red with "every feed failed", Reddit is blocking GitHub's servers;
 run it on your own machine instead. GitHub pauses schedules in a public repo

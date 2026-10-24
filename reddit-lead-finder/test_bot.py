@@ -231,6 +231,52 @@ class BotTests(unittest.TestCase):
         finally:
             bot.http_get, bot.time.sleep, bot.send_discord = orig
 
+    def test_every_post_goes_to_digest(self):
+        import tempfile
+        from datetime import timedelta
+        recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        feed = POSTS.replace("2026-10-23T10:00:00+00:00", recent).replace('term="nextjs"', 'term="betatests"')
+        orig = (bot.http_get, bot.time.sleep, bot.send_discord)
+        bot.http_get = lambda url, ua: feed if "/new/" in url else '<feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+        bot.time.sleep = lambda s: None
+        bot.send_discord = lambda w, p: self.fail("every-post match sent instantly")
+        settings = {**self.settings, "quiet_hours": []}
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                dg = bot.Digest(Path(d) / "digest.json")
+                seen = bot.Seen(Path(d) / "seen.json")
+                bot.run_pass(settings, [self.augur], seen, False, True, digest=dg)
+                self.assertEqual(len(bot.Digest(Path(d) / "digest.json").data["items"]["Augur"]), 1)
+        finally:
+            bot.http_get, bot.time.sleep, bot.send_discord = orig
+
+    def test_digest_due_once_a_day_and_sends(self):
+        import os, tempfile
+        sent = []
+        orig = (bot.send_discord, bot.time.sleep)
+        bot.send_discord, bot.time.sleep = (lambda w, p: sent.append(p)), (lambda s: None)
+        os.environ["DISCORD_WEBHOOK_AUGUR"] = "x"
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                dg = bot.Digest(Path(d) / "digest.json")
+                for n in range(60):  # enough to need two list messages
+                    dg.add(self.augur, bot.Item(f"t3_{n}", "post", "betatests", f"[Web] App {n} " + "x" * 60,
+                                                "", f"https://reddit.com/{n}", "", None))
+                dg.add(self.augur, bot.Item("t3_0", "post", "betatests", "dup", "", "https://reddit.com/0", "", None))
+                self.assertFalse(dg.due(self.augur, datetime(2026, 10, 24, 18, 59)))
+                self.assertTrue(dg.due(self.augur, datetime(2026, 10, 24, 19, 0)))
+                self.assertEqual(dg.send(self.augur, datetime(2026, 10, 24, 19, 5)), 60)
+                self.assertFalse(dg.due(self.augur, datetime(2026, 10, 24, 21, 0)))
+                self.assertTrue(dg.due(self.augur, datetime(2026, 10, 25, 19, 0)))
+                self.assertIn("60 new post(s)", sent[0]["content"])
+                self.assertEqual(sent[0]["embeds"][0]["title"], "How to reply")
+                lists = [m["embeds"][0]["description"] for m in sent[1:]]
+                self.assertGreaterEqual(len(lists), 2)
+                self.assertTrue(all(len(x) <= 4096 for x in lists))
+                self.assertIn("• [(Web) App 0", lists[0])
+        finally:
+            bot.send_discord, bot.time.sleep = orig
+
 
 if __name__ == "__main__":
     unittest.main()
