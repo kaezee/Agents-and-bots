@@ -97,6 +97,7 @@ def load_config(path: Path) -> tuple[dict, list[Product]]:
         "ignore_authors": [],
         "timezone": "UTC",
         "quiet_hours": [],
+        "busy_subreddits": [],
         **raw.get("settings", {}),
     }
     products = [
@@ -418,10 +419,14 @@ class Feed:
     sub: str = ""
 
 
-def feeds_for(products: list[Product], per_feed: int = 15) -> list[Feed]:
+def feeds_for(products: list[Product], per_feed: int = 15,
+              busy: list[str] = ()) -> list[Feed]:
     """Every subreddit any product needs, combined into multi-subreddit feeds
     (r/a+b+c/new), so a pass is a few requests instead of one per subreddit.
-    Reddit rate-limits unauthenticated requests hard, especially from cloud IPs."""
+    Reddit rate-limits unauthenticated requests hard, especially from cloud IPs.
+    A feed returns at most 100 items, so `busy` subreddits get a comments feed
+    of their own instead of crowding out the quieter ones."""
+    busy_set = {b.lower() for b in busy}
     subs: dict[str, dict[str, str]] = {"new": {}, "comments": {}}
     for p in products:
         for s in p.keyword_subreddits:
@@ -429,13 +434,16 @@ def feeds_for(products: list[Product], per_feed: int = 15) -> list[Feed]:
             subs["comments"].setdefault(s.lower(), s)
         for s in p.every_post_subreddits:
             subs["new"].setdefault(s.lower(), s)
+    groups = [("new", list(subs["new"].values()))]
+    comments = list(subs["comments"].values())
+    groups.append(("comments", [s for s in comments if s.lower() in busy_set]))
+    groups.append(("comments", [s for s in comments if s.lower() not in busy_set]))
     feeds = []
-    for kind, names in subs.items():
-        names = list(names.values())
+    for kind, names in groups:
         for i in range(0, len(names), per_feed):
             chunk = names[i:i + per_feed]
             sub = "+".join(chunk)
-            label = f"{kind} in {len(chunk)} subreddits"
+            label = f"{kind} in {', '.join(chunk) if len(chunk) <= 3 else f'{len(chunk)} subreddits'}"
             feeds.append(Feed(feed_url(sub, kind), label, kind,
                               lambda p, it, k=kind: p.watches(it.subreddit, k)))
     return feeds
@@ -542,7 +550,7 @@ def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool,
     ignore = {a.lower() for a in settings["ignore_authors"]}
     cutoff = datetime.now(timezone.utc) - timedelta(hours=settings["max_age_hours"])
     sent = failed = 0
-    feeds = feeds_for(products)
+    feeds = feeds_for(products, busy=settings["busy_subreddits"])
     for p in products:
         if search_due(p, seen):
             feeds += search_feeds(p)
@@ -561,7 +569,8 @@ def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool,
             log(f"{feed.label}: {e}")
             failed += 1
             continue
-        log(f"{feed.label}: {len(items)} item(s)")
+        full = " (feed full: older items between runs were missed)" if len(items) >= 100 else ""
+        log(f"{feed.label}: {len(items)} item(s){full}")
         for it in items:
             for p in products:
                 key = f"{p.name}:{it.id}"

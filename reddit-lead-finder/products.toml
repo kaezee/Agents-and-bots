@@ -14,7 +14,7 @@ user_agent = "lead-finder/0.1 (personal alert bot; by u/kaezee13)"
 poll_minutes = 5
 # Pause between feed requests. Reddit allows roughly one unauthenticated
 # request a minute from cloud IPs, and the feeds are combined so a pass is
-# only 2 requests (4 when the Reddit-wide search is due).
+# only 3 requests (5 when the Reddit-wide search is due).
 seconds_between_requests = 30
 # Ignore anything older than this, even if it's new to the bot.
 max_age_hours = 24
@@ -25,6 +25,10 @@ timezone = "Asia/Kolkata"
 # No notifications between these times: matches found then are held and sent
 # together, with a one-line summary, when quiet hours end. [] to turn off.
 quiet_hours = ["23:00", "08:00"]
+# A feed returns at most 100 items. These busy subreddits get a comments feed
+# of their own so they don't crowd out the quieter ones (one extra request).
+# If the log still says "feed full", split them further or run more often.
+busy_subreddits = ["ClaudeAI", "reactjs", "nextjs"]
 
 [[product]]
 name = "Augur"

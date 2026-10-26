@@ -87,6 +87,11 @@ class BotTests(unittest.TestCase):
     def test_feeds_deduplicated(self):
         feeds = bot.feeds_for([self.augur, self.augur])
         self.assertEqual(len(feeds), 2)  # one combined "new", one combined "comments"
+        split = bot.feeds_for([self.augur], busy=self.settings["busy_subreddits"])
+        self.assertEqual([f.kind for f in split], ["new", "comments", "comments"])
+        self.assertIn("/r/ClaudeAI+nextjs+reactjs/comments/", split[1].url)
+        self.assertNotIn("ClaudeAI", split[2].url)
+        self.assertEqual(split[2].url.count("+"), 6)  # the other 7 subreddits
         new = next(f for f in feeds if f.kind == "new")
         self.assertIn("/r/vibecoding+", new.url)
         self.assertEqual(new.url.count("+"), 11)  # 10 keyword + 2 every-post subs
