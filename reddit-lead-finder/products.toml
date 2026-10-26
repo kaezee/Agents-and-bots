@@ -27,7 +27,7 @@ timezone = "Asia/Kolkata"
 quiet_hours = ["23:00", "08:00"]
 # A feed returns at most 100 items. These busy subreddits get a comments feed
 # of their own so they don't crowd out the quieter ones (one extra request).
-# If the log still says "feed full", split them further or run more often.
+# If the log says "no overlap with the last run", split them further or run more often.
 busy_subreddits = ["ClaudeAI", "reactjs", "nextjs"]
 
 [[product]]

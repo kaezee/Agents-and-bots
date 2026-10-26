@@ -569,8 +569,13 @@ def run_pass(settings: dict, products: list[Product], seen: Seen, dry_run: bool,
             log(f"{feed.label}: {e}")
             failed += 1
             continue
-        full = " (feed full: older items between runs were missed)" if len(items) >= 100 else ""
-        log(f"{feed.label}: {len(items)} item(s){full}")
+        # Reddit always returns the latest 100. Items were only missed if none of
+        # them had been seen before, i.e. no overlap with the previous run.
+        new = sum(1 for it in items if not any(f"{p.name}:{it.id}" in seen for p in products))
+        # (Search results outside a product's scope are never recorded, so skip them.)
+        gap = (" (no overlap with the last run: older items were missed)"
+               if items and new == len(items) and feed.kind != "search" else "")
+        log(f"{feed.label}: {len(items)} item(s), {new} new{gap}")
         for it in items:
             for p in products:
                 key = f"{p.name}:{it.id}"

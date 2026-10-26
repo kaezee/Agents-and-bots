@@ -282,6 +282,26 @@ class BotTests(unittest.TestCase):
         finally:
             bot.send_discord, bot.time.sleep = orig
 
+    def test_gap_warning_only_without_overlap(self):
+        import io, tempfile, contextlib
+        orig = (bot.http_get, bot.time.sleep)
+        bot.http_get = lambda url, ua: POSTS if "/new/" in url else '<feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+        bot.time.sleep = lambda s: None
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                seen = bot.Seen(Path(d) / "seen.json")
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    bot.run_pass(self.settings, [self.augur], seen, True, False)
+                self.assertIn("2 item(s), 2 new (no overlap", out.getvalue())
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    bot.run_pass(self.settings, [self.augur], seen, True, False)
+                self.assertIn("2 item(s), 0 new", out.getvalue())
+                self.assertNotIn("no overlap", out.getvalue())
+        finally:
+            bot.http_get, bot.time.sleep = orig
+
 
 if __name__ == "__main__":
     unittest.main()
