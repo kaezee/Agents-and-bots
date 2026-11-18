@@ -25,6 +25,9 @@ permissions:
 
 jobs:
   poll:
+    # Paused: Reddit started rate-limiting every request from GitHub's servers
+    # (Nov 2026). Delete this line to turn the bot back on.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
